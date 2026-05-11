@@ -23,7 +23,10 @@ function pvToSan(fen: string, ucis: string[]): string[] {
 }
 
 function evalLabel(cp: number, isMate: boolean, mateIn?: number): string {
-  if (isMate) return mateIn !== undefined ? `M${Math.abs(mateIn)}` : "M";
+  if (isMate) {
+    const m = mateIn !== undefined ? mateIn : 0;
+    return m > 0 ? `+M${m}` : `-M${Math.abs(m)}`;
+  }
   const v = (cp / 100).toFixed(2);
   return cp >= 0 ? `+${v}` : v;
 }

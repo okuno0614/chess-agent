@@ -125,24 +125,40 @@ export class StockfishEngine {
             return;
           }
 
+          // Normalize a mate score to a large centipawn value so that
+          // centipawn-loss calculations work correctly in/out of mate positions.
+          // mateIn is already normalized to White's perspective (positive = White wins).
+          // Closer mates are given slightly higher magnitude so e.g. M3 > M5.
+          const MATE_BASE = 10000;
+          const mateEval = (mateIn: number): number =>
+            mateIn > 0
+              ? MATE_BASE - mateIn        // e.g. M3 → 9997
+              : -(MATE_BASE + mateIn);    // e.g. -M3 → -9997
+
           const pvLines: PvLine[] = [];
           pvMap.forEach((info, rank) => {
-            const isMate = info.score.mate !== undefined;
+            const pvIsMate = info.score.mate !== undefined;
+            const pvMateIn = pvIsMate ? (info.score.mate ?? 0) * sign : undefined;
             pvLines.push({
               rank,
-              evaluation: (info.score.cp ?? 0) * sign,
-              isMate,
-              mateIn: isMate ? (info.score.mate ?? 0) * sign : undefined,
+              evaluation: pvIsMate
+                ? mateEval(pvMateIn ?? 0)
+                : (info.score.cp ?? 0) * sign,
+              isMate: pvIsMate,
+              mateIn: pvMateIn,
               moves: info.pv,
             });
           });
           pvLines.sort((a, b) => a.rank - b.rank);
 
           const isMate = primaryPv.score.mate !== undefined;
+          const mateIn = isMate ? (primaryPv.score.mate ?? 0) * sign : undefined;
           resolve({
-            evaluation: (primaryPv.score.cp ?? 0) * sign,
+            evaluation: isMate
+              ? mateEval(mateIn ?? 0)
+              : (primaryPv.score.cp ?? 0) * sign,
             isMate,
-            mateIn: isMate ? (primaryPv.score.mate ?? 0) * sign : undefined,
+            mateIn,
             bestMove: bestmoveStr,
             multiPv: pvLines,
             depth: primaryPv.depth,
