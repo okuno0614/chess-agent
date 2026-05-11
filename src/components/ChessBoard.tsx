@@ -85,7 +85,7 @@ export function ChessBoard() {
 
         // Track eval
         if (evalBefore !== null) {
-          const quality = classifyMoveQuality(evalBefore, result.evaluation, move.color, result.isMate);
+          const quality = classifyMoveQuality(evalBefore, result.evaluation, move.color);
           updateLastMoveQuality(quality, result.evaluation);
           addEvalRecord({
             moveIndex: newHistory.length - 1,
@@ -188,7 +188,7 @@ export function ChessBoard() {
         if (isAutoAnalysis && evalBefore !== null && newHistory.length > 0) {
           const lastMoveRecord = newHistory[newHistory.length - 1];
           const evalAfter = result.evaluation;
-          const quality = classifyMoveQuality(evalBefore, evalAfter, lastMoveRecord.color, result.isMate);
+          const quality = classifyMoveQuality(evalBefore, evalAfter, lastMoveRecord.color);
           updateLastMoveQuality(quality, evalAfter);
           addEvalRecord({
             moveIndex: newHistory.length - 1,
@@ -320,20 +320,33 @@ export function ChessBoard() {
 
   const handleUndo = useCallback(() => {
     if (moveHistory.length === 0) return;
-    // In vs mode: undo 2 moves (opponent + player) unless only 1 exists
     const undoCount = gameMode === "vs-stockfish" && moveHistory.length >= 2 ? 2 : 1;
-    const toReplay = moveHistory.slice(0, -undoCount);
+    const remaining = moveHistory.slice(0, -undoCount);
+
     const chess = new Chess();
-    for (const m of toReplay) {
+    for (const m of remaining) {
       chess.move({ from: m.uci.slice(0, 2), to: m.uci.slice(2, 4), promotion: m.uci[4] });
     }
     const newFen = chess.fen();
     chessRef.current = chess;
-    // Undo twice from store if needed
-    for (let i = 0; i < undoCount; i++) {
-      useGameStore.getState().undoMove(chess.fen());
-    }
-    useGameStore.setState({ fen: newFen, lastMove: null, analysis: null, evalHistory: useGameStore.getState().evalHistory.slice(0, -undoCount) });
+
+    // Trim evalHistory to match remaining moves
+    const newEvalHistory = useGameStore.getState().evalHistory.slice(0, remaining.length);
+    // Restore pendingEvalBefore to the eval after the last remaining move
+    const newPendingEvalBefore =
+      newEvalHistory.length > 0
+        ? newEvalHistory[newEvalHistory.length - 1].evaluation
+        : null;
+
+    useGameStore.setState({
+      fen: newFen,
+      moveHistory: remaining,
+      evalHistory: newEvalHistory,
+      pendingEvalBefore: newPendingEvalBefore,
+      lastMove: null,
+      analysis: null,
+      gameOver: null,
+    });
     setShowHint(false);
   }, [moveHistory, gameMode, setShowHint]);
 
@@ -398,10 +411,13 @@ export function ChessBoard() {
       )}
 
       {/* Quality badge */}
-      {qualityMeta && (
+      {qualityMeta && lastMoveRecord && (
         <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg ${qualityMeta.bgColor} border border-gray-700`}>
           <span className={`text-lg font-bold ${qualityMeta.color}`}>{qualityMeta.icon}</span>
           <span className={`text-sm font-medium ${qualityMeta.color}`}>{qualityMeta.label}</span>
+          <span className="text-xs text-gray-400 ml-auto">
+            {lastMoveRecord.color === "w" ? "白" : "黒"} {lastMoveRecord.san}
+          </span>
         </div>
       )}
 
