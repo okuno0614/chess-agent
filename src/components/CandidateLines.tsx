@@ -1,6 +1,7 @@
 "use client";
 
 import { Chess } from "chess.js";
+import { useEffect, useState } from "react";
 import { useGameStore } from "@/store/game";
 
 function pvToSan(fen: string, ucis: string[]): string[] {
@@ -35,6 +36,12 @@ export function CandidateLines() {
   const analysis = useGameStore((s) => s.analysis);
   const fen = useGameStore((s) => s.fen);
   const thinking = useGameStore((s) => s.thinking);
+  const [revealed, setRevealed] = useState(false);
+
+  // 局面が変わったら自動的に折り畳む
+  useEffect(() => {
+    setRevealed(false);
+  }, [fen]);
 
   if (thinking) {
     return (
@@ -60,35 +67,49 @@ export function CandidateLines() {
 
   return (
     <div className="bg-gray-800 rounded-lg p-3">
-      <h3 className="text-xs font-semibold text-gray-400 uppercase mb-2">
-        候補手{" "}
-        <span className="text-gray-600 normal-case font-normal">
-          depth {analysis.depth}
-        </span>
-      </h3>
-      <div className="space-y-1.5">
-        {analysis.multiPv.slice(0, 3).map((pv) => {
-          const sans = pvToSan(fen, pv.moves);
-          const label = evalLabel(pv.evaluation, pv.isMate, pv.mateIn);
-          const isPositive = pv.isMate ? (pv.mateIn ?? 0) > 0 : pv.evaluation >= 0;
-
-          return (
-            <div key={pv.rank} className="flex items-center gap-2 text-sm">
-              <span className="text-gray-500 w-3 shrink-0">{pv.rank}.</span>
-              <span
-                className={`font-mono text-xs font-semibold w-12 shrink-0 ${
-                  isPositive ? "text-blue-400" : "text-orange-400"
-                }`}
-              >
-                {label}
-              </span>
-              <span className="text-gray-300 font-mono text-xs truncate">
-                {sans.join(" ")}
-              </span>
-            </div>
-          );
-        })}
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="text-xs font-semibold text-gray-400 uppercase">
+          候補手{" "}
+          <span className="text-gray-600 normal-case font-normal">
+            depth {analysis.depth}
+          </span>
+        </h3>
+        <button
+          onClick={() => setRevealed((v) => !v)}
+          className="text-xs px-2 py-0.5 rounded bg-gray-700 hover:bg-gray-600 text-gray-300 transition-colors"
+        >
+          {revealed ? "隠す" : "答えを見る"}
+        </button>
       </div>
+      {revealed ? (
+        <div className="space-y-1.5">
+          {analysis.multiPv.slice(0, 3).map((pv) => {
+            const sans = pvToSan(fen, pv.moves);
+            const label = evalLabel(pv.evaluation, pv.isMate, pv.mateIn);
+            const isPositive = pv.isMate ? (pv.mateIn ?? 0) > 0 : pv.evaluation >= 0;
+
+            return (
+              <div key={pv.rank} className="flex items-center gap-2 text-sm">
+                <span className="text-gray-500 w-3 shrink-0">{pv.rank}.</span>
+                <span
+                  className={`font-mono text-xs font-semibold w-12 shrink-0 ${
+                    isPositive ? "text-blue-400" : "text-orange-400"
+                  }`}
+                >
+                  {label}
+                </span>
+                <span className="text-gray-300 font-mono text-xs truncate">
+                  {sans.join(" ")}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="text-xs text-gray-600 italic">
+          解析完了 — 「答えを見る」を押すと候補手を表示します
+        </div>
+      )}
     </div>
   );
 }
