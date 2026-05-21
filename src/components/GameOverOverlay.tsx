@@ -1,11 +1,13 @@
 "use client";
 
 import { useGameStore } from "@/store/game";
-import { Chess } from "chess.js";
 
 export default function GameOverOverlay() {
   const gameOver = useGameStore((s) => s.gameOver);
   const reset = useGameStore((s) => s.reset);
+  const enterReviewMode = useGameStore((s) => s.enterReviewMode);
+  const saveCurrentGame = useGameStore((s) => s.saveCurrentGame);
+  const moveHistory = useGameStore((s) => s.moveHistory);
 
   if (!gameOver) return null;
 
@@ -16,6 +18,11 @@ export default function GameOverOverlay() {
     threefold: "🤝",
     insufficient: "🤝",
     fifty: "🤝",
+  };
+
+  const handleSaveAndNew = () => {
+    saveCurrentGame();
+    reset();
   };
 
   return (
@@ -29,10 +36,26 @@ export default function GameOverOverlay() {
             {gameOver.winner === "white" ? "⬜ 白の勝利" : "⬛ 黒の勝利"}
           </p>
         )}
-        <div className="flex gap-3 justify-center mt-6">
+        <div className="flex flex-col gap-2 mt-6">
+          {moveHistory.length > 0 && (
+            <button
+              onClick={enterReviewMode}
+              className="w-full px-6 py-2.5 bg-emerald-700 hover:bg-emerald-600 text-white rounded-lg font-semibold transition-colors"
+            >
+              📋 棋譜を振り返る
+            </button>
+          )}
+          {moveHistory.length > 0 && (
+            <button
+              onClick={handleSaveAndNew}
+              className="w-full px-6 py-2.5 bg-gray-700 hover:bg-gray-600 text-white rounded-lg font-semibold transition-colors"
+            >
+              💾 保存して新しいゲーム
+            </button>
+          )}
           <button
             onClick={reset}
-            className="px-6 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-semibold transition-colors"
+            className="w-full px-6 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-semibold transition-colors"
           >
             新しいゲーム
           </button>
