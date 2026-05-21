@@ -10,6 +10,7 @@ import OpeningDisplay from "@/components/OpeningDisplay";
 import EvalChart from "@/components/EvalChart";
 import GameOverOverlay from "@/components/GameOverOverlay";
 import GameSetup from "@/components/GameSetup";
+import ReviewControls from "@/components/ReviewControls";
 import { useGameStore } from "@/store/game";
 
 const ChessBoard = dynamic(
@@ -180,6 +181,7 @@ export default function Home() {
         {/* Left column: board + controls */}
         <div className="flex flex-col gap-3 lg:w-[560px] shrink-0">
           <OpeningDisplay />
+          <ReviewControls />
           <div className="flex gap-2">
             <div className="w-6 shrink-0" style={{ height: "560px" }}>
               <EvaluationBar />

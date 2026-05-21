@@ -21,11 +21,14 @@ export function ChessBoard() {
     thinking, aiResponding, analysisDepth, pendingEvalBefore,
     showHint, analysis,
     gameMode, playerColor, stockfishSkill, isStockfishThinking, gameStarted,
+    isReviewMode, isAnalysisMode, reviewMoveIndex, reviewSnapshot, analysisFen,
+    pendingStockfishResume,
     setFen, addMove, updateLastMoveQuality, setLastMove,
     setAnalysis, setThinking, addChatMessage, updateLastAssistantMessage,
     setAiResponding, undoMove, reset, addEvalRecord, setPendingEvalBefore,
     setAnalysisDepth, setGameOver, setOpeningInfo, setShowHint,
     toggleBoardOrientation, setIsStockfishThinking, setPendingCoachContext,
+    setAnalysisFen, setPendingStockfishResume,
   } = useGameStore();
 
   // Initialize engine client-side only
@@ -35,6 +38,50 @@ export function ChessBoard() {
       engineRef.current = getEngine();
     });
   }, []);
+
+  // Analyze position without side effects (used in review/analysis mode)
+  const analyzeOnly = useCallback(
+    async (fenToAnalyze: string) => {
+      const engine = engineRef.current;
+      if (!engine) return;
+      setThinking(true);
+      setAnalysis(null);
+      try {
+        let result: EngineAnalysis;
+        try {
+          result = await engine.analyzePosition(fenToAnalyze, analysisDepth, 3);
+        } catch {
+          engine.reinitialize();
+          result = await engine.analyzePosition(fenToAnalyze, analysisDepth, 3);
+        }
+        setAnalysis(result);
+      } catch (e) {
+        console.error("analyzeOnly failed:", e);
+      } finally {
+        setThinking(false);
+      }
+    },
+    [analysisDepth, setThinking, setAnalysis]
+  );
+
+  // Analyze the review position when navigating
+  useEffect(() => {
+    if (!isReviewMode || isAnalysisMode) return;
+    const reviewFen =
+      reviewMoveIndex === 0
+        ? "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+        : reviewSnapshot?.moves[reviewMoveIndex - 1]?.fen;
+    if (reviewFen) analyzeOnly(reviewFen);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isReviewMode, reviewMoveIndex]);
+
+  // Trigger Stockfish when resuming a game from a mid-game position
+  useEffect(() => {
+    if (!pendingStockfishResume || !gameStarted || !engineRef.current) return;
+    setPendingStockfishResume(false);
+    applyStockfishMove(fen, moveHistory, pendingEvalBefore);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingStockfishResume, gameStarted]);
 
   /** Apply Stockfish's move and run coach commentary */
   const applyStockfishMove = useCallback(
@@ -265,6 +312,30 @@ export function ChessBoard() {
   const onPieceDrop = useCallback(
     ({ piece, sourceSquare, targetSquare }: PieceDropHandlerArgs): boolean => {
       if (!targetSquare) return false;
+
+      // In analysis mode (free exploration): allow both colors, update analysisFen only
+      if (isReviewMode && isAnalysisMode) {
+        const chess = new Chess(analysisFen);
+        const pieceType = piece.pieceType;
+        const isPromotion =
+          pieceType[1]?.toLowerCase() === "p" &&
+          (targetSquare[1] === "8" || targetSquare[1] === "1");
+        try {
+          const move = chess.move({
+            from: sourceSquare, to: targetSquare,
+            promotion: isPromotion ? "q" : undefined,
+          });
+          if (!move) return false;
+          const newFen = chess.fen();
+          setAnalysisFen(newFen);
+          analyzeOnly(newFen);
+          return true;
+        } catch { return false; }
+      }
+
+      // Block all drops in review (non-analysis) mode
+      if (isReviewMode) return false;
+
       if (thinking || aiResponding || isStockfishThinking) return false;
 
       // In vs-stockfish mode, block if it's not player's turn
@@ -314,7 +385,9 @@ export function ChessBoard() {
     [
       fen, moveHistory, thinking, aiResponding, isStockfishThinking,
       gameMode, playerColor, pendingEvalBefore,
+      isReviewMode, isAnalysisMode, analysisFen,
       setFen, addMove, setLastMove, setShowHint, runAnalysis,
+      setAnalysisFen, analyzeOnly,
     ]
   );
 
@@ -391,10 +464,33 @@ export function ChessBoard() {
     return chess.turn() === (playerColor === "white" ? "w" : "b");
   })();
 
+  // Determine the FEN to display on the board
+  const INIT_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+  const displayFen = isAnalysisMode
+    ? analysisFen
+    : isReviewMode
+    ? reviewMoveIndex === 0
+      ? INIT_FEN
+      : reviewSnapshot?.moves[reviewMoveIndex - 1]?.fen ?? INIT_FEN
+    : fen;
+
   return (
     <div className="flex flex-col gap-3">
-      {/* Status bar */}
-      {gameMode === "vs-stockfish" && (
+      {/* Review / analysis mode status */}
+      {isReviewMode && (
+        <div className={`text-xs font-medium px-3 py-1.5 rounded-lg text-center ${
+          isAnalysisMode
+            ? "bg-purple-900/40 text-purple-300"
+            : "bg-emerald-900/40 text-emerald-300"
+        }`}>
+          {isAnalysisMode
+            ? "🔬 フリー探索 — 白黒両方動かせます"
+            : `📋 振り返り中 — ${reviewMoveIndex}/${reviewSnapshot?.moves.length ?? 0}手目`}
+        </div>
+      )}
+
+      {/* Status bar (normal play only) */}
+      {!isReviewMode && gameMode === "vs-stockfish" && (
         <div className={`text-sm font-medium px-3 py-1.5 rounded-lg text-center ${
           isStockfishThinking
             ? "bg-orange-900/40 text-orange-300 animate-pulse"
@@ -410,8 +506,8 @@ export function ChessBoard() {
         </div>
       )}
 
-      {/* Quality badge */}
-      {qualityMeta && lastMoveRecord && (
+      {/* Quality badge (normal play only) */}
+      {!isReviewMode && qualityMeta && lastMoveRecord && (
         <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg ${qualityMeta.bgColor} border border-gray-700`}>
           <span className={`text-lg font-bold ${qualityMeta.color}`}>{qualityMeta.icon}</span>
           <span className={`text-sm font-medium ${qualityMeta.color}`}>{qualityMeta.label}</span>
@@ -423,7 +519,7 @@ export function ChessBoard() {
 
       <Chessboard
         options={{
-          position: fen,
+          position: displayFen,
           onPieceDrop,
           boardOrientation,
           squareStyles: customSquareStyles,
@@ -434,11 +530,16 @@ export function ChessBoard() {
           },
           darkSquareStyle: { backgroundColor: "#4a7c59" },
           lightSquareStyle: { backgroundColor: "#f0d9b5" },
-          allowDragging: isMyTurn && !thinking && !aiResponding && !isStockfishThinking,
+          allowDragging: isAnalysisMode
+            ? !thinking
+            : isReviewMode
+            ? false
+            : isMyTurn && !thinking && !aiResponding && !isStockfishThinking,
         }}
       />
 
-      {/* Controls row 1 */}
+      {/* Controls row 1 (hidden in review mode) */}
+      {!isReviewMode && (
       <div className="flex gap-2">
         <button
           onClick={handleUndo}
@@ -461,8 +562,10 @@ export function ChessBoard() {
           リセット
         </button>
       </div>
+      )}
 
-      {/* Controls row 2 */}
+      {/* Controls row 2 (hidden in review mode) */}
+      {!isReviewMode && (
       <div className="flex gap-2">
         <button
           onClick={() => setShowHint(!showHint)}
@@ -489,6 +592,7 @@ export function ChessBoard() {
           {copyFeedback === "pgn" ? "✓ コピー済" : "PGNコピー"}
         </button>
       </div>
+      )}
 
       {/* Depth slider */}
       <div className="bg-gray-800 rounded-lg px-3 py-2">

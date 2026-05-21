@@ -62,3 +62,24 @@ export interface OpeningInfo {
   name: string;
   description?: string;
 }
+
+export interface ReviewSnapshot {
+  moves: MoveRecord[];
+  evalHistory: EvalRecord[];
+  result: GameOverState | null;
+  playerColor: "white" | "black";
+  stockfishSkill: number;
+  gameMode: "free" | "vs-stockfish";
+}
+
+export interface SavedGame {
+  id: string;
+  date: string; // ISO string
+  moves: MoveRecord[];
+  evalHistory: EvalRecord[];
+  result: GameOverState | null;
+  playerColor: "white" | "black";
+  stockfishSkill: number;
+  gameMode: "free" | "vs-stockfish";
+  pgn: string;
+}

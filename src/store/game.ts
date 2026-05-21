@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { Chess } from "chess.js";
 import type {
   EngineAnalysis,
   MoveRecord,
@@ -6,7 +7,10 @@ import type {
   EvalRecord,
   GameOverState,
   OpeningInfo,
+  ReviewSnapshot,
+  SavedGame,
 } from "@/types";
+import { loadSavedGames, persistGame, removeGame } from "@/lib/savedGames";
 
 export interface PendingCoachContext {
   fen: string;
@@ -41,6 +45,14 @@ interface GameState {
   gameStarted: boolean;
   pendingCoachContext: PendingCoachContext | null;
   autoCoachMode: boolean;
+  // Review / analysis mode
+  isReviewMode: boolean;
+  isAnalysisMode: boolean;
+  reviewMoveIndex: number;
+  reviewSnapshot: ReviewSnapshot | null;
+  analysisFen: string;
+  pendingStockfishResume: boolean;
+  savedGames: SavedGame[];
 }
 
 interface GameActions {
@@ -70,6 +82,27 @@ interface GameActions {
   startGame: (playerColor: "white" | "black", skill: number) => void;
   setPendingCoachContext: (ctx: PendingCoachContext | null) => void;
   setAutoCoachMode: (val: boolean) => void;
+  // Review / analysis mode
+  enterReviewMode: () => void;
+  exitReviewMode: () => void;
+  setReviewMoveIndex: (n: number) => void;
+  enterAnalysisMode: () => void;
+  exitAnalysisMode: () => void;
+  setAnalysisFen: (fen: string) => void;
+  setPendingStockfishResume: (val: boolean) => void;
+  // Saved games
+  saveCurrentGame: () => void;
+  loadSavedGamesAction: () => void;
+  deleteSavedGame: (id: string) => void;
+  loadGameForReview: (game: SavedGame) => void;
+  resumeFromPosition: (
+    fen: string,
+    priorMoves: MoveRecord[],
+    priorEvals: EvalRecord[],
+    playerColor: "white" | "black",
+    stockfishSkill: number,
+    needsStockfishFirst: boolean
+  ) => void;
 }
 
 const INITIAL_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
@@ -96,6 +129,13 @@ const defaultState: GameState = {
   gameStarted: false,
   pendingCoachContext: null,
   autoCoachMode: false,
+  isReviewMode: false,
+  isAnalysisMode: false,
+  reviewMoveIndex: 0,
+  reviewSnapshot: null,
+  analysisFen: INITIAL_FEN,
+  pendingStockfishResume: false,
+  savedGames: [],
 };
 
 export const useGameStore = create<GameState & GameActions>((set) => ({
@@ -163,4 +203,132 @@ export const useGameStore = create<GameState & GameActions>((set) => ({
     }),
   setPendingCoachContext: (ctx) => set({ pendingCoachContext: ctx }),
   setAutoCoachMode: (val) => set({ autoCoachMode: val }),
+
+  // ── Review / analysis mode ──────────────────────────────────────
+  enterReviewMode: () =>
+    set((s) => ({
+      isReviewMode: true,
+      isAnalysisMode: false,
+      reviewMoveIndex: s.moveHistory.length,
+      reviewSnapshot: {
+        moves: s.moveHistory,
+        evalHistory: s.evalHistory,
+        result: s.gameOver,
+        playerColor: s.playerColor,
+        stockfishSkill: s.stockfishSkill,
+        gameMode: s.gameMode,
+      },
+      analysisFen: s.fen,
+      gameOver: null,
+    })),
+
+  exitReviewMode: () =>
+    set({
+      isReviewMode: false,
+      isAnalysisMode: false,
+      reviewMoveIndex: 0,
+      reviewSnapshot: null,
+      pendingStockfishResume: false,
+    }),
+
+  setReviewMoveIndex: (n) =>
+    set((s) => {
+      if (!s.reviewSnapshot) return {};
+      const clamped = Math.max(0, Math.min(n, s.reviewSnapshot.moves.length));
+      const fen =
+        clamped === 0
+          ? INITIAL_FEN
+          : s.reviewSnapshot.moves[clamped - 1].fen;
+      return { reviewMoveIndex: clamped, analysisFen: fen };
+    }),
+
+  enterAnalysisMode: () =>
+    set((s) => {
+      const fen =
+        s.reviewMoveIndex === 0
+          ? INITIAL_FEN
+          : s.reviewSnapshot?.moves[s.reviewMoveIndex - 1]?.fen ?? INITIAL_FEN;
+      return { isAnalysisMode: true, analysisFen: fen };
+    }),
+
+  exitAnalysisMode: () => set({ isAnalysisMode: false }),
+
+  setAnalysisFen: (fen) => set({ analysisFen: fen }),
+
+  setPendingStockfishResume: (val) => set({ pendingStockfishResume: val }),
+
+  // ── Saved games ─────────────────────────────────────────────────
+  saveCurrentGame: () =>
+    set((s) => {
+      const snap = s.reviewSnapshot ?? {
+        moves: s.moveHistory,
+        evalHistory: s.evalHistory,
+        result: s.gameOver,
+        playerColor: s.playerColor,
+        stockfishSkill: s.stockfishSkill,
+        gameMode: s.gameMode,
+      };
+      if (snap.moves.length === 0) return {};
+      // Build PGN
+      const chess = new Chess();
+      for (const m of snap.moves) {
+        try {
+          chess.move({ from: m.uci.slice(0, 2), to: m.uci.slice(2, 4), promotion: m.uci[4] });
+        } catch { break; }
+      }
+      const game: SavedGame = {
+        id: `game-${Date.now()}`,
+        date: new Date().toISOString(),
+        moves: snap.moves,
+        evalHistory: snap.evalHistory,
+        result: snap.result,
+        playerColor: snap.playerColor,
+        stockfishSkill: snap.stockfishSkill,
+        gameMode: snap.gameMode,
+        pgn: chess.pgn(),
+      };
+      persistGame(game);
+      return { savedGames: [game, ...s.savedGames.filter((g) => g.id !== game.id)].slice(0, 20) };
+    }),
+
+  loadSavedGamesAction: () =>
+    set({ savedGames: loadSavedGames() }),
+
+  deleteSavedGame: (id) =>
+    set((s) => {
+      removeGame(id);
+      return { savedGames: s.savedGames.filter((g) => g.id !== id) };
+    }),
+
+  loadGameForReview: (game) =>
+    set({
+      isReviewMode: true,
+      isAnalysisMode: false,
+      reviewMoveIndex: game.moves.length,
+      reviewSnapshot: {
+        moves: game.moves,
+        evalHistory: game.evalHistory,
+        result: game.result,
+        playerColor: game.playerColor,
+        stockfishSkill: game.stockfishSkill,
+        gameMode: game.gameMode,
+      },
+      analysisFen: game.moves.length > 0 ? game.moves[game.moves.length - 1].fen : INITIAL_FEN,
+      gameOver: null,
+    }),
+
+  resumeFromPosition: (fen, priorMoves, priorEvals, playerColor, stockfishSkill, needsStockfishFirst) =>
+    set({
+      ...defaultState,
+      fen,
+      moveHistory: priorMoves,
+      evalHistory: priorEvals,
+      pendingEvalBefore: priorEvals.length > 0 ? priorEvals[priorEvals.length - 1].evaluation : null,
+      gameMode: "vs-stockfish",
+      playerColor,
+      stockfishSkill,
+      boardOrientation: playerColor,
+      gameStarted: true,
+      pendingStockfishResume: needsStockfishFirst,
+    }),
 }));
